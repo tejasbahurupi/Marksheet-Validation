@@ -1,7 +1,8 @@
 import { MetaMaskInpageProvider } from "@metamask/providers";
+import contractAbi from "../constants/ContractABI.json";
 import { ethers, Contract, BrowserProvider } from "ethers";
 import { toast } from "react-hot-toast";
-import { CONTRACT_ADDRESS, CONTRACT_ABI } from "../constants";
+import { CONTRACT_ADDRESS} from "../constants";
 
 declare global {
   interface Window {
@@ -37,7 +38,7 @@ export const connectWallet = async (): Promise<
     const signer = await provider.getSigner();
     const contractInstance: Contract = new ethers.Contract(
       CONTRACT_ADDRESS,
-      CONTRACT_ABI,
+      contractAbi,
       signer
     );
     //console.log(contractInstance, selectedAccount);

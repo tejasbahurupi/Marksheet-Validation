@@ -3,7 +3,7 @@ import { toast } from "react-hot-toast";
 import * as ExcelJS from "exceljs";
 import { CONTRACT_ADDRESS, CONTRACT_ABI, PUBLIC_RPC_URL } from "../constants";
 
-// Interfaces
+// --- Interfaces ---
 export interface StudentData {
   enrollmentNumber: string;
   semester: string;
@@ -17,16 +17,18 @@ export interface BatchResult {
   totalProcessed: number;
 }
 
+// --- Hashing Utilities ---
 export const generateMarksheetHash = (marks?: any): string => {
-  console.log("Generating hash for marks:", marks);
-  return ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(marks)));
+  // stringify once to ensure consistency
+  const dataToHash = JSON.stringify(marks || {});
+  return ethers.keccak256(ethers.toUtf8Bytes(dataToHash));
 };
 
 export const generateQrCodeData = (marks: any): string => {
-  const hash = generateMarksheetHash(marks);
-  return hash;
+  return generateMarksheetHash(marks);
 };
 
+// --- Excel Parsing ---
 export const parseExcelFile = async (file: File): Promise<StudentData[]> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -38,8 +40,7 @@ export const parseExcelFile = async (file: File): Promise<StudentData[]> => {
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.load(buffer);
         const worksheet = workbook.worksheets[0];
-        if (!worksheet)
-          throw new Error("No worksheets found in the Excel file.");
+        if (!worksheet) throw new Error("No worksheets found in the Excel file.");
 
         const students: StudentData[] = [];
         const headers: string[] = [];
@@ -56,7 +57,6 @@ export const parseExcelFile = async (file: File): Promise<StudentData[]> => {
             if (header) rowData[header] = cell.value;
           });
 
-          // FIX: Ensure all required fields are converted to strings
           const student: StudentData = {
             enrollmentNumber: String(
               rowData["Enrollment Number"] || rowData["enrollmentNumber"] || ""
@@ -68,13 +68,9 @@ export const parseExcelFile = async (file: File): Promise<StudentData[]> => {
           students.push(student);
         });
 
-        const validStudents = students.filter(
-          (s) => s.enrollmentNumber && s.semester
-        );
+        const validStudents = students.filter((s) => s.enrollmentNumber && s.semester);
         if (validStudents.length === 0) {
-          throw new Error(
-            'No valid data found. Ensure Excel has "Enrollment Number" and "Semester" columns.'
-          );
+          throw new Error('Ensure Excel has "Enrollment Number" and "Semester" columns.');
         }
         resolve(validStudents);
       } catch (error) {
@@ -87,6 +83,12 @@ export const parseExcelFile = async (file: File): Promise<StudentData[]> => {
   });
 };
 
+// --- Core Blockchain Logic ---
+
+/**
+ * FIXED BATCH PROCESSOR
+ * Forces one confirmation per 50 students.
+ */
 export const processBulkMarksheets = async (
   contractInstance: Contract,
   students: StudentData[],
@@ -96,78 +98,61 @@ export const processBulkMarksheets = async (
     toast.error("Blockchain connection not available.");
     return { successful: [], failed: [], totalProcessed: 0 };
   }
-  const BATCH_SIZE = 5;
+
+  const BATCH_SIZE = 50; 
   const successful: StudentData[] = [];
   const failed: { student: StudentData; error: string }[] = [];
 
-  try {
-    for (let i = 0; i < students.length; i += BATCH_SIZE) {
-      const batch = students.slice(i, i + BATCH_SIZE);
-      const studentIds = batch.map(
-        (s) => `${s.enrollmentNumber.trim().toUpperCase()}-${s.semester.trim()}`
-      );
-      const hashes = batch.map((s) => generateMarksheetHash(s.marks));
-
-      try {
-        const tx = await contractInstance.batchStoreHashes(studentIds, hashes);
-        await tx.wait();
-        successful.push(...batch);
-        toast.success(
-          `Batch ${Math.floor(i / BATCH_SIZE) + 1} processed successfully`
-        );
-      } catch (batchError: any) {
-        console.error(
-          `Batch ${Math.floor(i / BATCH_SIZE) + 1} failed:`,
-          batchError
-        );
-        toast.error(`Batch failed. Trying individual transactions...`);
-
-        for (const student of batch) {
-          try {
-            // FIX: Added 'student.marks' to ensure the correct hash is generated and stored.
-            const success = await storeMarksheetHashOnBlockchain(
-              contractInstance,
-              student.enrollmentNumber,
-              student.semester,
-              student.marks
-            );
-            if (success) {
-              successful.push(student);
-            } else {
-              failed.push({
-                student,
-                error: "Individual transaction was rejected.",
-              });
-            }
-          } catch (individualError: any) {
-            const message =
-              individualError?.reason ||
-              individualError?.message ||
-              "Unknown error.";
-            failed.push({ student, error: message });
-          }
-        }
-      }
-      if (onProgress) {
-        onProgress(Math.min(i + BATCH_SIZE, students.length), students.length);
-      }
-      // Add a small delay between batches to avoid overwhelming the network/RPC node.
-      if (i + BATCH_SIZE < students.length) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      }
-    }
-    toast.success(
-      `Bulk processing complete! ${successful.length} successful, ${failed.length} failed`
+  for (let i = 0; i < students.length; i += BATCH_SIZE) {
+    const batch = students.slice(i, i + BATCH_SIZE);
+    
+    // Prepare arrays for Solidity
+    const studentIds = batch.map(
+      (s) => `${s.enrollmentNumber.trim().toUpperCase()}-${s.semester.trim()}`
     );
-  } catch (error) {
-    console.error("Bulk processing error:", error);
-    toast.error("A critical error occurred during bulk processing.");
+    const hashes = batch.map((s) => generateMarksheetHash(s.marks));
+
+    try {
+      const toastId = toast.loading(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: Waiting for one signature for ${batch.length} students...`);
+
+      const tx = await contractInstance.batchStoreHashes(studentIds, hashes);
+
+      toast.loading(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: Mining on Sepolia...`, { id: toastId });
+
+      // Wait for block confirmation before proceeding to next batch
+      const receipt = await tx.wait(); 
+      
+      if (receipt.status === 1) {
+        successful.push(...batch);
+        toast.success(`Batch ${Math.floor(i / BATCH_SIZE) + 1} finalized on-chain!`, { id: toastId });
+      } else {
+        throw new Error("Transaction reverted on-chain.");
+      }
+
+    } catch (batchError: any) {
+      console.error(`Batch Error Log:`, batchError);
+      
+      if (batchError.code === 'ACTION_REJECTED' || batchError.code === 4001) {
+        toast.error("User rejected transaction. Bulk upload stopped.");
+        break; 
+      }
+
+      // If it fails here, check if your wallet is authorized in the contract!
+      toast.error(`Batch failed. Check console for revert details.`);
+      batch.forEach(s => failed.push({ student: s, error: "Batch call failed" }));
+    }
+
+    if (onProgress) {
+      onProgress(Math.min(i + BATCH_SIZE, students.length), students.length);
+    }
+
+    // Delay to prevent RPC rate limiting (spam alert)
+    if (i + BATCH_SIZE < students.length) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
   }
-  return {
-    successful,
-    failed,
-    totalProcessed: successful.length + failed.length,
-  };
+
+  return { successful, failed, totalProcessed: successful.length + failed.length };
 };
 
 export const storeMarksheetHashOnBlockchain = async (
@@ -176,23 +161,17 @@ export const storeMarksheetHashOnBlockchain = async (
   semester: string,
   subjects?: any
 ): Promise<boolean> => {
-  if (!contractInstance) {
-    toast.error("Blockchain connection not available");
-    return false;
-  }
+  if (!contractInstance) return false;
   try {
-    const studentId = `${enrollmentNumber
-      .trim()
-      .toUpperCase()}-${semester.trim()}`;
-    console.log("Storing hash for student ID:", studentId);
+    const studentId = `${enrollmentNumber.trim().toUpperCase()}-${semester.trim()}`;
     const hash = generateMarksheetHash(subjects);
-    const tx = await contractInstance.storeHash(studentId, hash);
+    const tx = await contractInstance.storeHash(studentId, hash, { gasLimit: 500000 });
     await tx.wait();
-    toast.success("Marksheet recorded on blockchain");
+    toast.success("Record saved successfully");
     return true;
   } catch (error) {
-    console.error("Error storing hash on blockchain:", error);
-    toast.error("Failed to record marksheet on blockchain");
+    console.error("Single storage error:", error);
+    toast.error("Failed to save record");
     return false;
   }
 };
@@ -204,31 +183,22 @@ export const verifyHashFromBlockchain = async (
 ): Promise<boolean> => {
   try {
     const provider = new ethers.JsonRpcProvider(PUBLIC_RPC_URL);
-    const contract = new ethers.Contract(
-      CONTRACT_ADDRESS,
-      CONTRACT_ABI,
-      provider
-    );
-    const studentId = `${enrollmentNumber
-      .trim()
-      .toUpperCase()}-${semesterNumber.trim()}`;
+    const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
+    const studentId = `${enrollmentNumber.trim().toUpperCase()}-${semesterNumber.trim()}`;
     const storedHash = await contract.getStoredHash(studentId);
 
     if (storedHash === ethers.ZeroHash) {
-      toast.error("No record found on the blockchain.");
+      toast.error("No record found.");
       return false;
     }
     if (storedHash.toLowerCase() !== backendHash.toLowerCase()) {
-      toast.error(
-        "Document verification FAILED. The record does not match the blockchain."
-      );
+      toast.error("Verification FAILED. Data mismatch.");
       return false;
     }
-    toast.success("Marksheet Verified Successfully!");
+    toast.success("Verified on Blockchain!");
     return true;
   } catch (error) {
-    console.error("Error fetching hash from blockchain:", error);
-    toast.error("Failed to communicate with the blockchain.");
+    console.error("Verification error:", error);
     return false;
   }
 };
