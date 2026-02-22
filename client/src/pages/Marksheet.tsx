@@ -1,369 +1,202 @@
-import { useEffect, useState } from "react";
+// src/pages/BulkMarksheets.tsx
+
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import QRCode from "react-qr-code";
-import {
-  generateQrCodeData,
-  storeMarksheetHashOnBlockchain,
-} from "../utils/blockchain";
-import { useWeb3Context } from "../contexts/Web3Context";
-import { toast } from "react-hot-toast";
+import { BatchResult, StudentData } from "../utils/blockchain";
 
-interface Subject {
-  name: string;
-  marks: number;
-  grade: string;
-}
+// Helper function to calculate grades and SGPA for a single student
+const processStudentData = (student: StudentData) => {
+  const gradePoints = { O: 10, "A+": 9, A: 8, "B+": 7, B: 6, C: 5, P: 4, F: 0 };
 
-interface StudentData {
-  name: string;
-  enrollmentNumber: string;
-  semester: string;
-  subjects: Subject[];
-}
+  const getGrade = (marks: number): string => {
+    if (marks >= 80) return "O";
+    if (marks >= 70) return "A+";
+    if (marks >= 60) return "A";
+    if (marks >= 55) return "B+";
+    if (marks >= 50) return "B";
+    if (marks >= 45) return "C";
+    if (marks >= 40) return "P";
+    return "F";
+  };
 
-export default function Marksheet() {
-  const [student, setStudent] = useState<StudentData | null>(null);
-  const [totalGradePoints, setTotalGradePoints] = useState<string>("0");
-  const [sgpa, setSgpa] = useState<string>("-");
-  const [overallGrade, setOverallGrade] = useState<string>("");
-  const [qrCodeData, setQrCodeData] = useState<string>("");
-  const [isRecordingOnBlockchain, setIsRecordingOnBlockchain] = useState(false);
+  // Extract subjects and marks from the 'marks' object, excluding identifying info
+  const subjects = Object.keys(student.marks)
+    .filter((key) => !["Enrollment Number", "Semester", "Name"].includes(key))
+    .map((subjectName) => {
+      const marks = Number(student.marks[subjectName]) || 0;
+      return {
+        name: subjectName,
+        marks: marks,
+        grade: getGrade(marks),
+      };
+    });
+
+  const totalGradePoints = subjects.reduce(
+    (total, s) =>
+      total + (gradePoints[s.grade as keyof typeof gradePoints] || 0),
+    0
+  );
+  const sgpa =
+    subjects.length > 0
+      ? (totalGradePoints / subjects.length).toFixed(2)
+      : "0.00";
+
+  return { ...student, subjects, sgpa };
+};
+
+// A self-contained Marksheet component for individual display
+const MarksheetCard: React.FC<{ student: any }> = ({ student }) => {
+  return (
+    <div className="bg-white rounded-md shadow-md max-w-4xl w-full mb-8 break-inside-avoid">
+      {/* Header */}
+      <div className="flex items-start p-6 border-b-2 border-gray-300">
+        <img
+          src="/pic.jpg"
+          alt="College Logo"
+          className="w-20 h-20 mr-6 object-contain"
+        />
+        <div>
+          <p className="text-sm text-gray-600 font-medium">
+            Society for Computer Technology and Research's
+          </p>
+          <h1 className="text-2xl font-bold text-gray-900">
+            PUNE INSTITUTE OF COMPUTER TECHNOLOGY
+          </h1>
+          <p className="text-xs text-gray-500 mt-1">
+            (An Autonomous Institute affiliated to Savitribai Phule Pune
+            University)
+          </p>
+        </div>
+      </div>
+      <div className="border-b border-gray-300 px-6 py-3 bg-gray-50">
+        <p className="text-gray-800 font-semibold">STATEMENT OF GRADES</p>
+      </div>
+      {/* Content */}
+      <div className="p-6 space-y-6">
+        {/* Student Details */}
+        <div className="border border-gray-200 p-4 rounded-md">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <p className="text-gray-600 font-medium text-sm">Name</p>
+              <p className="text-gray-900">{student.name}</p>
+            </div>
+            <div>
+              <p className="text-gray-600 font-medium text-sm">
+                Enrollment No.
+              </p>
+              <p className="text-gray-900">{student.enrollmentNumber}</p>
+            </div>
+            <div>
+              <p className="text-gray-600 font-medium text-sm">Semester</p>
+              <p className="text-gray-900">{student.semester}</p>
+            </div>
+          </div>
+        </div>
+        {/* Subjects & Marks */}
+        <div className="overflow-x-auto border border-gray-200 rounded-md">
+          <table className="min-w-full">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">
+                  No.
+                </th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">
+                  Subject
+                </th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">
+                  Grade
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {student.subjects.map((subject: any, index: number) => (
+                <tr key={index} className="hover:bg-gray-50">
+                  <td className="px-4 py-2 text-sm text-gray-500">
+                    {index + 1}
+                  </td>
+                  <td className="px-4 py-2 text-sm text-gray-800">
+                    {subject.name}
+                  </td>
+                  <td className="px-4 py-2 text-sm font-medium">
+                    {subject.grade}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {/* Performance Summary */}
+        <div className="border border-gray-200 p-4 rounded-md">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-gray-50 p-3 rounded">
+              <p className="text-gray-600 font-medium text-sm">
+                Semester GPA (SGPA)
+              </p>
+              <p className="text-gray-900 text-xl font-medium mt-1">
+                {student.sgpa}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+      {/* Footer */}
+      <div className="flex items-center justify-between p-6 border-t border-gray-300 bg-gray-50">
+        <div>
+          <QRCode value={student.qrCodeData} size={80} level="H" />
+          <p className="text-gray-600 text-xs mt-1">Blockchain Verification</p>
+        </div>
+        <div className="flex flex-col">
+          <div className="h-16"></div>
+          <div className="w-40 border-t border-gray-400"></div>
+          <p className="text-gray-600 text-sm mt-1">
+            Controller of Examination
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default function BulkMarksheets() {
+  const [processedStudents, setProcessedStudents] = useState<any[]>([]);
   const navigate = useNavigate();
-  const { web3State } = useWeb3Context();
 
-  // Get current date for the marksheet
   useEffect(() => {
-    // Get student data from localStorage
-    const studentDataStr = localStorage.getItem("studentData");
-    const totalGradePointsStr = localStorage.getItem("totalGradePoints");
-    const sgpaStr = localStorage.getItem("sgpa");
-
-    localStorage.removeItem("studentData");
-    localStorage.removeItem("totalGradePoints");
-    localStorage.removeItem("sgpa");
-
-    if (!studentDataStr) {
-      // If no data found, redirect to home page
+    const resultsStr = sessionStorage.getItem("bulkUploadResults");
+    if (!resultsStr) {
       navigate("/home");
       return;
     }
 
-    const studentData = JSON.parse(studentDataStr);
-    setStudent(studentData);
+    const results: BatchResult = JSON.parse(resultsStr);
+    const studentsToDisplay = results.successful.map(processStudentData);
+    setProcessedStudents(studentsToDisplay);
 
-    // Generate QR code data for blockchain verification
-    if (studentData.enrollmentNumber && studentData.semester) {
-      const qrData = generateQrCodeData(
-        studentData.enrollmentNumber,
-        studentData.semester
-      );
-      setQrCodeData(qrData);
-    }
-
-    if (totalGradePointsStr) {
-      setTotalGradePoints(totalGradePointsStr);
-    }
-
-    if (sgpaStr) {
-      setSgpa(sgpaStr);
-      // Determine overall grade based on SGPA
-      const numSgpa = parseFloat(sgpaStr);
-      if (numSgpa >= 9.5) setOverallGrade("O");
-      else if (numSgpa >= 8.5) setOverallGrade("A+");
-      else if (numSgpa >= 7.5) setOverallGrade("A");
-      else if (numSgpa >= 6.5) setOverallGrade("B+");
-      else if (numSgpa >= 5.5) setOverallGrade("B");
-      else if (numSgpa >= 4.5) setOverallGrade("C");
-      else if (numSgpa >= 4.0) setOverallGrade("P");
-      else setOverallGrade("F");
-    }
+    // Clean up sessionStorage after use
+    sessionStorage.removeItem("bulkUploadResults");
   }, [navigate]);
 
-  const handlePrint = () => {
-    window.print();
-  };
-
-  // Function to record the marksheet on the blockchain
-  const recordOnBlockchain = async () => {
-    if (!student) return;
-
-    setIsRecordingOnBlockchain(true);
-
-    try {
-      if (!web3State.contractInstance || !web3State.selectedAccount) {
-        toast.error("Please connect your wallet first");
-        return;
-      }
-
-      const result = await storeMarksheetHashOnBlockchain(
-        web3State.contractInstance,
-        student.enrollmentNumber,
-        student.semester
-      );
-
-      if (result) {
-        toast.success("Marksheet successfully recorded on blockchain");
-      }
-    } catch (error) {
-      console.error("Error recording on blockchain:", error);
-      toast.error("Failed to record on blockchain");
-    } finally {
-      setIsRecordingOnBlockchain(false);
-    }
-  };
-
-  if (!student) {
+  if (processedStudents.length === 0) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="bg-white p-6 rounded-md shadow-md">
-          <p className="text-gray-700">Loading student data...</p>
-        </div>
+      <div className="text-center p-8">
+        Loading results or no successful uploads found...
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-6">
-      <div className="bg-white rounded-md shadow-md max-w-4xl w-full">
-        {/* Watermark - only visible when printing */}
-        <div className="fixed inset-0 flex items-center justify-center opacity-5 pointer-events-none print:block hidden">
-          <div className="rotate-45 text-9xl font-bold text-gray-300">
-            OFFICIAL
-          </div>
-        </div>
-
-        {/* Header */}
-        <div className="flex items-start p-6 border-b-2 border-gray-300">
-          {/* Logo */}
-          <img
-            src="/pic.jpg"
-            alt="College Logo"
-            className="w-20 h-20 mr-6 object-contain"
-          />
-
-          {/* Header Text */}
-          <div>
-            <p className="text-sm text-gray-600 font-medium">
-              Society for Computer Technology and Research's
-            </p>
-            <h1 className="text-2xl font-bold text-gray-900">
-              PUNE INSTITUTE OF COMPUTER TECHNOLOGY
-            </h1>
-            <p className="text-xs text-gray-500 mt-1">
-              (An Autonomous Institute affiliated to Savitribai Phule Pune
-              University)
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              AICTE APPROVED | ISO 9001:2015 | NAAC A+ Grade | NBA [All Eligible
-              UG Programs]
-            </p>
-          </div>
-        </div>
-
-        {/* Document title and date row */}
-        <div className="border-b border-gray-300 px-6 py-3 flex justify-between items-center bg-gray-50">
-          <p className="text-gray-800 font-semibold">STATEMENT OF GRADES</p>
-          {/*<p className="text-gray-600">Date: {formattedDate}</p>*/}
-        </div>
-
-        {/* Content */}
-        <div className="p-6 space-y-6">
-          {/* Student Details */}
-          <div className="border border-gray-200 p-4 rounded-md">
-            <h2 className="text-lg font-semibold text-gray-800 mb-3 pb-1 border-b border-gray-200">
-              Student Details
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <p className="text-gray-600 font-medium text-sm">Name</p>
-                <p className="text-gray-900">{student.name}</p>
-              </div>
-              <div>
-                <p className="text-gray-600 font-medium text-sm">
-                  Enrollment No.
-                </p>
-                <p className="text-gray-900">{student.enrollmentNumber}</p>
-              </div>
-              <div>
-                <p className="text-gray-600 font-medium text-sm">Semester</p>
-                <p className="text-gray-900">{student.semester}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Subjects & Marks */}
-          <div>
-            <h2 className="text-lg font-semibold text-gray-800 mb-3">
-              Subjects & Marks
-            </h2>
-            <div className="overflow-x-auto border border-gray-200 rounded-md">
-              <table className="min-w-full">
-                <thead>
-                  <tr className="bg-gray-100">
-                    <th className="border-b border-gray-200 px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                      No.
-                    </th>
-                    <th className="border-b border-gray-200 px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                      Subject
-                    </th>
-                    <th className="border-b border-gray-200 px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                      Grade
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {student.subjects.map((subject, index) => (
-                    <tr key={index} className="hover:bg-gray-50">
-                      <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
-                        {index + 1}
-                      </td>
-                      <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-800">
-                        {subject.name}
-                      </td>
-                      <td className="px-4 py-2 whitespace-nowrap text-sm font-medium">
-                        {subject.grade}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Performance Summary */}
-          <div className="border border-gray-200 p-4 rounded-md">
-            <h2 className="text-lg font-semibold text-gray-800 mb-3 pb-1 border-b border-gray-200">
-              Performance Summary
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="bg-gray-50 p-3 rounded">
-                <p className="text-gray-600 font-medium text-sm">
-                  Total Grade Points
-                </p>
-                <p className="text-gray-900 text-xl font-medium mt-1">
-                  {totalGradePoints}
-                </p>
-              </div>
-              <div className="bg-gray-50 p-3 rounded">
-                <p className="text-gray-600 font-medium text-sm">
-                  Semester GPA (SGPA)
-                </p>
-                <p className="text-gray-900 text-xl font-medium mt-1">
-                  {sgpa == "0" ? "-" : sgpa}
-                </p>
-              </div>
-              <div className="bg-gray-50 p-3 rounded">
-                <p className="text-gray-600 font-medium text-sm">
-                  Overall Grade
-                </p>
-                <p className="text-gray-900 text-xl font-medium mt-1">
-                  {overallGrade}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Grade Description */}
-          <div className="border border-gray-200 p-4 rounded-md">
-            <h2 className="text-lg font-semibold text-gray-800 mb-3 pb-1 border-b border-gray-200">
-              Grade Description
-            </h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-              <div>
-                <span className="font-medium">O:</span> Outstanding (10)
-              </div>
-              <div>
-                <span className="font-medium">A+:</span> Excellent (9)
-              </div>
-              <div>
-                <span className="font-medium">A:</span> Very Good (8)
-              </div>
-              <div>
-                <span className="font-medium">B+:</span> Good (7)
-              </div>
-              <div>
-                <span className="font-medium">B:</span> Above Average (6)
-              </div>
-              <div>
-                <span className="font-medium">C:</span> Average (5)
-              </div>
-              <div>
-                <span className="font-medium">P:</span> Pass (4)
-              </div>
-              <div>
-                <span className="font-medium">F:</span> Fail (0)
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between p-6 border-t border-gray-300 bg-gray-50">
-          {/* QR Code for Blockchain Verification */}
-          <div className="flex flex-col">
-            <div className="mb-2">
-              {qrCodeData && (
-                <div>
-                  <QRCode
-                    value={`https://marksheet-validation.pages.dev/verify/${student.enrollmentNumber}/${student.semester}`}
-                    size={100}
-                    style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                    level="H"
-                  />
-                  <p className="text-gray-600 text-xs mt-1">
-                    Blockchain Verification
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Signature Block */}
-          <div className="flex flex-col">
-            <div className="h-16"></div>
-            <div className="w-40 border-t border-gray-400"></div>
-            <p className="text-gray-600 text-sm mt-1">
-              Controller of Examination
-            </p>
-          </div>
-
-          {/* College Seal */}
-          <div className="flex flex-col items-center mx-4">
-            <div className="w-24 h-24 border border-gray-300 rounded-full flex items-center justify-center bg-gray-50">
-              <span className="text-xs text-gray-500">Official Seal</span>
-            </div>
-          </div>
-
-          {/* Buttons */}
-          <div className="flex flex-col space-y-2 print:hidden">
-            <button
-              onClick={handlePrint}
-              className="bg-gray-800 hover:bg-gray-900 text-white px-6 py-2 rounded-md shadow-sm text-sm">
-              Print Marksheet
-            </button>
-
-            <button
-              onClick={recordOnBlockchain}
-              disabled={isRecordingOnBlockchain}
-              className={`${
-                isRecordingOnBlockchain
-                  ? "bg-blue-400 cursor-not-allowed"
-                  : "bg-blue-600 hover:bg-blue-700"
-              } text-white px-6 py-2 rounded-md shadow-sm text-sm`}>
-              {isRecordingOnBlockchain
-                ? "Recording..."
-                : "Record on Blockchain"}
-            </button>
-          </div>
-        </div>
-
-        {/* Important Note */}
-        <div className="p-4 border-t border-gray-200 bg-gray-50 text-xs text-gray-500 italic text-center">
-          This document is electronically generated and does not require
-          signature if verified online. To verify, please visit the official
-          institute website.
-        </div>
+    <div className="min-h-screen bg-gray-100 p-4 sm:p-8">
+      <div className="max-w-4xl mx-auto mb-8 print:hidden">
+        <button
+          onClick={() => window.print()}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-transform transform hover:scale-105">
+          Print All Marksheets
+        </button>
       </div>
+      {processedStudents.map((student, index) => (
+        <MarksheetCard key={index} student={student} />
+      ))}
     </div>
   );
 }
