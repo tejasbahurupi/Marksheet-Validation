@@ -85,7 +85,6 @@ export const parseExcelFile = async (file: File): Promise<StudentData[]> => {
     reader.onerror = () => reject(new Error("Failed to read file"));
     reader.readAsArrayBuffer(file);
   });
-  ``;
 };
 
 export const processBulkMarksheets = async (
