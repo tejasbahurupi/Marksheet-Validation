@@ -104,16 +104,54 @@ export const processBulkMarksheets = async (
   const failed: { student: StudentData; error: string }[] = [];
 
   for (let i = 0; i < students.length; i += BATCH_SIZE) {
-    const batch = students.slice(i, i + BATCH_SIZE);
+    const rawBatch = students.slice(i, i + BATCH_SIZE);
     
-    // Prepare arrays for Solidity
+    // --- NEW: Pre-check for existing records ---
+    const existenceCheckToastId = toast.loading(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: Checking for existing records...`);
+    const studentIdsForCheck = rawBatch.map(
+      (s) => `${s.enrollmentNumber.trim().toUpperCase()}-${s.semester.trim()}`
+    );
+    
+    let existingHashes: string[] = [];
+    try {
+      // Use the batchGetStoredHashes function we saw in the Smart Contract
+      existingHashes = await contractInstance.batchGetStoredHashes(studentIdsForCheck);
+    } catch (error) {
+      console.error("Error checking existence:", error);
+      toast.dismiss(existenceCheckToastId);
+      toast.error(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: Failed to verify existing records.`);
+      rawBatch.forEach(s => failed.push({ student: s, error: "Failed to verify existence on blockchain" }));
+      continue; // Skip this batch if we can't verify
+    }
+    toast.dismiss(existenceCheckToastId);
+
+    // Filter out students that already have a non-zero hash on the blockchain
+    const batch: StudentData[] = [];
+    rawBatch.forEach((student, index) => {
+      if (existingHashes[index] !== ethers.ZeroHash) {
+        failed.push({ 
+          student, 
+          error: "Record already exists on the blockchain." 
+        });
+      } else {
+        batch.push(student);
+      }
+    });
+
+    if (batch.length === 0) {
+      toast.success(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: All records already exist. Skipping.`);
+      continue;
+    }
+    // -------------------------------------------
+    
+    // Prepare arrays for Solidity (using the filtered batch)
     const studentIds = batch.map(
       (s) => `${s.enrollmentNumber.trim().toUpperCase()}-${s.semester.trim()}`
     );
     const hashes = batch.map((s) => generateMarksheetHash(s.marks));
 
     try {
-      const toastId = toast.loading(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: Waiting for one signature for ${batch.length} students...`);
+      const toastId = toast.loading(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: Waiting for one signature for ${batch.length} new students...`);
 
       const tx = await contractInstance.batchStoreHashes(studentIds, hashes);
 

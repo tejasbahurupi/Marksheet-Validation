@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import QRCode from "react-qr-code";
-import { BatchResult, StudentData } from "../utils/blockchain";
+import { BatchResult, StudentData, generateQrCodeData } from "../utils/blockchain";
 
 // Helper function to calculate grades and SGPA for a single student
 const processStudentData = (student: StudentData) => {
@@ -42,7 +42,9 @@ const processStudentData = (student: StudentData) => {
       ? (totalGradePoints / subjects.length).toFixed(2)
       : "0.00";
 
-  return { ...student, subjects, sgpa };
+  const qrCodeData = generateQrCodeData(student.marks);
+
+  return { ...student, subjects, sgpa, qrCodeData };
 };
 
 // A self-contained Marksheet component for individual display
@@ -163,18 +165,33 @@ export default function BulkMarksheets() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const resultsStr = sessionStorage.getItem("bulkUploadResults");
-    if (!resultsStr) {
-      navigate("/home");
+    const bulkResultsStr = sessionStorage.getItem("bulkUploadResults");
+    if (bulkResultsStr) {
+      const results: BatchResult = JSON.parse(bulkResultsStr);
+      const studentsToDisplay = results.successful.map(processStudentData);
+      setProcessedStudents(studentsToDisplay);
+      sessionStorage.removeItem("bulkUploadResults");
       return;
     }
 
-    const results: BatchResult = JSON.parse(resultsStr);
-    const studentsToDisplay = results.successful.map(processStudentData);
-    setProcessedStudents(studentsToDisplay);
+    const singleStudentStr = localStorage.getItem("studentData");
+    if (singleStudentStr) {
+      const studentData = JSON.parse(singleStudentStr);
+      const sgpa = localStorage.getItem("sgpa") || "0.00";
+      const qrCodeData = localStorage.getItem("qrCodeData") || "";
+      
+      setProcessedStudents([{
+        ...studentData,
+        sgpa,
+        qrCodeData
+      }]);
+      localStorage.removeItem("studentData");
+      localStorage.removeItem("sgpa");
+      localStorage.removeItem("qrCodeData");
+      return;
+    }
 
-    // Clean up sessionStorage after use
-    sessionStorage.removeItem("bulkUploadResults");
+    navigate("/home");
   }, [navigate]);
 
   if (processedStudents.length === 0) {

@@ -7,6 +7,7 @@ import {
   processBulkMarksheets,
   storeMarksheetHashOnBlockchain,
   BatchResult,
+  generateMarksheetHash
 } from "../utils/blockchain";
 import { connectWallet } from "../utils/ConnectWallet";
 import { Contract } from "ethers";
@@ -171,6 +172,8 @@ const Home: React.FC = () => {
 
       localStorage.setItem("studentData", JSON.stringify(studentDataForPdf));
       localStorage.setItem("sgpa", sgpa);
+      const qrCodeData = generateMarksheetHash(subjects);
+      localStorage.setItem("qrCodeData", qrCodeData);
 
       handleSuccess("Marksheet generated successfully!");
       navigate("/marksheet");
@@ -657,6 +660,36 @@ const Home: React.FC = () => {
                       <div style={{ fontSize: "0.8rem", color: "#fca5a5", fontWeight: 600, marginTop: "4px" }}>Failed</div>
                     </div>
                   </div>
+
+                  {batchResult.successful.length > 0 && (
+                    <div style={{ marginTop: "24px", display: "flex", justifyContent: "center" }}>
+                      <button
+                        onClick={() => {
+                          sessionStorage.setItem("bulkUploadResults", JSON.stringify(batchResult));
+                          navigate("/marksheet");
+                        }}
+                        style={{
+                          padding: "12px 24px",
+                          background: "linear-gradient(135deg, #10b981, #059669)",
+                          border: "none",
+                          borderRadius: "10px",
+                          color: "white",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          boxShadow: "0 4px 14px rgba(16,185,129,0.3)"
+                        }}
+                      >
+                        <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.478 0-8.268-2.943-9.542-7z" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        View & Print Marksheets ({batchResult.successful.length})
+                      </button>
+                    </div>
+                  )}
 
                   {batchResult.failed.length > 0 && (
                     <div style={{ marginTop: "16px" }}>
